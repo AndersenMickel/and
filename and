@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract DecentralizedCrowdfunding {
+    struct Project {
+        address creator;
+        uint256 goalAmount;
+        uint256 totalFundsRaised;
+        mapping(address => uint256) contributions;
+        bool completed;
+        mapping(address => bool) hasWithdrawn;
+    }
+
+    mapping(uint256 => Project) public projects;
+    uint256 public projectCount;
+    address public owner;
+
+    event ProjectCreated(uint256 projectId, address creator, uint256 goalAmount);
+    event FundsContributed(uint256 projectId, address contributor, uint256 amount);
+    event ProjectCompleted(uint256 projectId, bool successfullyCompleted);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can perform this action");
+        _;
+    }
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    function createProject(uint256 _goalAmount) external {
+        uint256 projectId = projectCount++;
+        projects[projectId] = Project({
+            creator: msg.sender,
+            goalAmount: _goalAmount,
+            totalFundsRaised: 0,
+            completed: false
+        });
+        emit ProjectCreated(projectId, msg.sender, _goalAmount);
+    }
+
+    function contributeFunds(uint256 _projectId) external payable {
+        require(!projects[_projectId].completed, "Project already completed");
+        projects[_projectId].totalFundsRaised += msg.value;
+        projects[_projectId].contributions[msg.sender] += msg.value;
+        emit FundsContributed(_projectId, msg.sender, msg.value);
+    }
+
+    function withdrawFunds(uint256 _projectId) external {
+        require(projects[_projectId].completed, "Project not yet completed");
+        require(!projects[_projectId].hasWithdrawn[msg.sender], "Already withdrawn");
+        require(projects[_projectId].contributions[msg.sender] > 0, "No contribution");
+        
+        projects[_projectId].hasWithdrawn[msg.sender] = true;
+        payable(msg.sender).transfer(projects[_projectId].contributions[msg.sender]);
+    }
+
+    function completeProject(uint256 _projectId, bool _successfullyCompleted) external onlyOwner {
+        require(!projects[_projectId].completed, "Project already completed");
+        if (_successfullyCompleted) {
+            if (projects[_projectId].totalFundsRaised >= projects[_projectId].goalAmount) {
+                payable(projects[_projectId].creator).transfer(projects[_projectId].totalFundsRaised);
+            } else {
+                refundContributors(_projectId);
+            }
+        } else {
+            refundContributors(_projectId);
+        }
+        projects[_projectId].completed = true;
+        emit ProjectCompleted(_projectId, _successfullyCompleted);
+    }
+
+    function refundContributors(uint256 _projectId) private {
+        for (uint256 i = 0; i < projectCount; i++) {
+            address contributor = projects[_projectId].creator;
+            if (projects[_projectId].contributions[contributor] > 0 && !projects[_projectId].hasWithdrawn[contributor]) {
+                payable(contributor).transfer(projects[_projectId].contributions[contributor]);
+                projects[_projectId].hasWithdrawn[contributor] = true;
+            }
+        }
+    }
+}
